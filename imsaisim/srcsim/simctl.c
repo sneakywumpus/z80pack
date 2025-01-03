@@ -57,7 +57,6 @@
 #endif
 
 #ifdef FRONTPANEL
-#include <X11/Xlib.h>
 #include "frontpanel.h"
 #include "log.h"
 static const char *TAG = "system";
@@ -93,8 +92,6 @@ void mon(void)
 #ifdef FRONTPANEL
 	if (F_flag) {
 		/* initialize front panel */
-		XInitThreads();
-
 		putchar('\n');
 		if (!fp_init2(&confdir[0], "panel.conf", fp_size)) {
 			LOGE(TAG, "frontpanel error");

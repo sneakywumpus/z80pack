@@ -53,7 +53,7 @@
 #include "unix_terminal.h"
 
 #ifdef FRONTPANEL
-#include <X11/Xlib.h>
+#include "simsdl.h"
 #include "frontpanel.h"
 #include "log.h"
 static const char *TAG = "system";
@@ -72,6 +72,14 @@ static void protect_clicked(int state, int val);
 static void int_clicked(int state, int val);
 static void power_clicked(int state, int val);
 static void quit_callback(void);
+
+static int fp_win_id;	/* frontpanel window id */
+static win_funcs_t fp_win_funcs = {
+	fp_openWindow,
+	fp_quit,
+	fp_procEvent,
+	fp_draw
+};
 #endif /* FRONTPANEL */
 
 int boot_switch;		/* boot address for switch */
@@ -89,12 +97,11 @@ void mon(void)
 #ifdef FRONTPANEL
 	if (F_flag) {
 		/* initialize frontpanel */
-		XInitThreads();
-
 		if (!fp_init2(confdir, "panel.conf", fp_size)) {
 			LOGE(TAG, "frontpanel error");
 			exit(EXIT_FAILURE);
 		}
+		fp_win_id = simsdl_create(&fp_win_funcs);
 
 		fp_addQuitCallback(quit_callback);
 		fp_framerate(fp_fps);
@@ -225,7 +232,7 @@ void mon(void)
 		sleep_for_ms(999);
 
 		/* shutdown frontpanel */
-		fp_quit();
+		simsdl_destroy(fp_win_id);
 	}
 #endif
 
@@ -560,6 +567,8 @@ static void power_clicked(int state, int val)
  */
 static void quit_callback(void)
 {
+	simsdl_destroy(fp_win_id);
+
 	power--;
 	cpu_switch = 0;
 	cpu_state = ST_STOPPED;

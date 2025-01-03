@@ -1,3 +1,3 @@
-For building the frontpanel machines on some Debian Linux you need:
+For building the frontpanel machines on Debian Linux you need:
 
-sudo apt install libjpeg9-dev libgl1-mesa-dev libglu1-mesa-dev
+sudo apt install libsdl2-dev libsdl2-image-dev

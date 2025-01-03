@@ -10,7 +10,7 @@ Full documentation is at https://www.icl1900.co.uk/unix4fun/z80pack
 ### Building
 First install the needed dependencies:
 
-    sudo apt install build-essential libglu1-mesa-dev libjpeg9-dev
+    sudo apt install build-essential libsdl2-dev libsdl2-image-dev
 
 Then run 
 

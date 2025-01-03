@@ -4,6 +4,7 @@
  * Common I/O devices used by various simulated machines
  *
  * Copyright (C) 2017-2019 by Udo Munk
+ * Copyright (C) 2025 by Thomas Eberhardt
  *
  * Emulation of a Processor Technology VDM-1 S100 board
  *
@@ -13,14 +14,11 @@
  * 20-APR-2018 avoid thread deadlock on Windows/Cygwin
  * 15-JUL-2018 use logging
  * 04-NOV-2019 eliminate usage of mem_base()
+ * 03-JAN-2025 use SDL2 instead of X11
  */
 
 #include <stddef.h>
 #include <stdint.h>
-#include <X11/X.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -29,34 +27,28 @@
 #include "simglb.h"
 #include "simmem.h"
 #include "simport.h"
+#include "simsdl.h"
 
 #include "proctec-vdm-charset.h"
 #include "proctec-vdm.h"
 
+#if 0
 #include "log.h"
 static const char *TAG = "VDM";
+#endif
 
 #define XOFF 10				/* use some offset inside the window */
 #define YOFF 15				/* for the drawing area */
 
-/* X11 stuff */
+/* SDL stuff */
        int slf = 1;			/* scanlines factor, default no lines */
 static int xsize, ysize;		/* window size */
 static int sx, sy;
-static Display *display;
-static Window window;
-static int screen;
-static GC gc;
-static XWindowAttributes wa;
-static Pixmap pixmap;
-static Colormap colormap;
-static XColor black, bg, fg;
-static char black_color[] = "#000000";	/* black */
-       char bg_color[] = "#303030";	/* default background color */
-       char fg_color[] = "#FFFFFF";	/* default foreground color */
-static XEvent event;
-static KeySym key;
-static char text[10];
+static SDL_Window *window;
+static SDL_Renderer *renderer;
+static int proctec_win_id = -1;
+       uint8_t bg_color[3] = {48, 48, 48};	/* default background color */
+       uint8_t fg_color[3] = {255, 255, 255};	/* default foreground color */
 
 /* VDM stuff */
 static int state;			/* state on/off for refresh thread */
@@ -66,96 +58,60 @@ int proctec_kbd_data = -1;		/* keyboard data */
 static int first;			/* first displayed screen position */
 static int beg;				/* beginning display line address */
 
-/* UNIX stuff */
-static pthread_t thread;
-
-/* create the X11 window for VDM display */
-static void open_display(void)
+/* create the SDL window for VDM display */
+static void open_window(void)
 {
-	Window rootwindow;
-	XSizeHints *size_hints = XAllocSizeHints();
-	Atom wm_delete_window;
-
 	xsize = 576 + (XOFF * 2);
 	ysize = (208 * slf) + (YOFF * 2);
 
-	display = XOpenDisplay(NULL);
-	XLockDisplay(display);
-	screen = DefaultScreen(display);
-	rootwindow = RootWindow(display, screen);
-	XGetWindowAttributes(display, rootwindow, &wa);
-	window = XCreateSimpleWindow(display, rootwindow, 0, 0,
-				     xsize, ysize, 1, 0, 0);
-	XStoreName(display, window, "Processor Technology VDM-1");
-	size_hints->flags = PSize | PMinSize | PMaxSize;
-	size_hints->min_width = xsize;
-	size_hints->min_height = ysize;
-	size_hints->base_width = xsize;
-	size_hints->base_height = ysize;
-	size_hints->max_width = xsize;
-	size_hints->max_height = ysize;
-	XSetWMNormalHints(display, window, size_hints);
-	XFree(size_hints);
-	wm_delete_window = XInternAtom(display, "WM_DELETE_WINDOW", False);
-	XSetWMProtocols(display, window, &wm_delete_window, 1);
-	XSelectInput(display, window, KeyPressMask);
-	colormap = DefaultColormap(display, 0);
-	gc = XCreateGC(display, window, 0, NULL);
-	pixmap = XCreatePixmap(display, rootwindow, xsize, ysize, wa.depth);
+	window = SDL_CreateWindow("Processor Technology VDM-1",
+				  SDL_WINDOWPOS_UNDEFINED,
+				  SDL_WINDOWPOS_UNDEFINED,
+				  xsize, ysize, 0);
+	renderer = SDL_CreateRenderer(window, -1, (SDL_RENDERER_ACCELERATED |
+						   SDL_RENDERER_PRESENTVSYNC));
 
-	XParseColor(display, colormap, black_color, &black);
-	XAllocColor(display, colormap, &black);
-	XParseColor(display, colormap, bg_color, &bg);
-	XAllocColor(display, colormap, &bg);
-	XParseColor(display, colormap, fg_color, &fg);
-	XAllocColor(display, colormap, &fg);
-
-	XMapWindow(display, window);
-	XSetForeground(display, gc, black.pixel);
-	XFillRectangle(display, pixmap, gc, 0, 0, xsize, ysize);
-	XSync(display, True);
-	XUnlockDisplay(display);
+	SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
+	SDL_RenderClear(renderer);
+	SDL_RenderPresent(renderer);
 }
 
-/* shutdown VDM thread and window */
+/* close the SDL window for VDM display */
+static void close_window(void)
+{
+	SDL_DestroyRenderer(renderer);
+	renderer = NULL;
+	SDL_DestroyWindow(window);
+	window = NULL;
+}
+
+/* shutdown VDM window */
 void proctec_vdm_off(void)
 {
 	state = 0;		/* tell refresh thread to stop */
-	sleep_for_ms(50);	/* and wait a bit */
 
-	/* works if X11 with posix threads implemented correct, but ... */
-	if (thread != 0) {
-		pthread_cancel(thread);
-		pthread_join(thread, NULL);
-	}
-
-	if (display != NULL) {
-		XLockDisplay(display);
-		XFreePixmap(display, pixmap);
-		XFreeGC(display, gc);
-		XUnlockDisplay(display);
-		XCloseDisplay(display);
+	if (proctec_win_id >= 0) {
+		simsdl_destroy(proctec_win_id);
+		proctec_win_id = -1;
 	}
 }
 
 /*
- * Check the X11 event queue, we are only interested in keyboard input.
+ * Process a SDL event, we are only interested in keyboard input.
  * Note that I'm using the event queue as typeahead buffer, saves to
  * implement one self.
  */
-static inline void event_handler(void)
+static void event_handler(SDL_Event *event)
 {
 	/* if the last character wasn't processed already do nothing */
 	/* keep event in queue until the CPU emulation got current one */
 	if (proctec_kbd_status == 0)
 		return;
 
-	/* if there is a keyboard event get it and convert with keymap */
-	if (XEventsQueued(display, QueuedAlready) > 0) {
-		XNextEvent(display, &event);
-		if ((event.type == KeyPress) &&
-		    XLookupString(&event.xkey, text, 1, &key, 0) == 1) {
-			proctec_kbd_data = text[0];
+	/* if there is a keyboard event get it and convert to ASCII */
+	if (event->type == SDL_KEYDOWN) {
+		if (event->key.windowID == SDL_GetWindowID(window)) {
+			proctec_kbd_data = event->key.keysym.sym & 0x7F; /* WRONG!!! */
 			proctec_kbd_status = 0;
 		}
 	}
@@ -171,16 +127,32 @@ static void dc(BYTE c)
 		for (y = 0; y < 13; y++) {
 			if (charset[c & 0x7f][y][x] == 1) {
 				if (!inv)
-					XSetForeground(display, gc, fg.pixel);
+					SDL_SetRenderDrawColor(renderer,
+							       fg_color[0],
+							       fg_color[1],
+							       fg_color[2],
+							       SDL_ALPHA_OPAQUE);
 				else
-					XSetForeground(display, gc, bg.pixel);
+					SDL_SetRenderDrawColor(renderer,
+							       bg_color[0],
+							       bg_color[1],
+							       bg_color[2],
+							       SDL_ALPHA_OPAQUE);
 			} else {
 				if (!inv)
-					XSetForeground(display, gc, bg.pixel);
+					SDL_SetRenderDrawColor(renderer,
+							       bg_color[0],
+							       bg_color[1],
+							       bg_color[2],
+							       SDL_ALPHA_OPAQUE);
 				else
-					XSetForeground(display, gc, fg.pixel);
+					SDL_SetRenderDrawColor(renderer,
+							       fg_color[0],
+							       fg_color[1],
+							       fg_color[2],
+							       SDL_ALPHA_OPAQUE);
 			}
-			XDrawPoint(display, pixmap, gc, sx + x, sy + (y * slf));
+			SDL_RenderDrawPoint(renderer, sx + x, sy + (y * slf));
 		}
 	}
 }
@@ -197,7 +169,6 @@ static void refresh(void)
 
 	for (y = 0; y < 16; y++) {
 		sx = XOFF;
-		event_handler();
 		for (x = 0; x < 64; x++) {
 			if (y >= first) {
 				c = getmem(addr + x);
@@ -213,56 +184,22 @@ static void refresh(void)
 	}
 }
 
-/* thread for updating the display */
-static void *update_display(void *arg)
+/* function for updating the display */
+static void update_display(void)
 {
-	uint64_t t1, t2;
-	int tdiff;
-
-	UNUSED(arg);
-
-	t1 = get_clock_us();
-
-	while (state) {
-
-		/* lock display, don't cancel thread while locked */
-		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-		XLockDisplay(display);
-
+	if (state) {
 		/* update display window */
 		refresh();
-		XCopyArea(display, pixmap, window, gc, 0, 0,
-			  xsize, ysize, 0, 0);
-		XSync(display, False);
-
-		/* unlock display, thread can be canceled again */
-		XUnlockDisplay(display);
-		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-
-		/* sleep rest to 33ms so that we get 30 fps */
-		t2 = get_clock_us();
-		tdiff = t2 - t1;
-		if ((tdiff > 0) && (tdiff < 33000))
-			sleep_for_ms(33 - (tdiff / 1000));
-
-		t1 = get_clock_us();
-	}
-
-	pthread_exit(NULL);
-}
-
-/* create the X11 window and start display refresh thread */
-static void vdm_init(void)
-{
-	open_display();
-
-	state = 1;
-
-	if (pthread_create(&thread, NULL, update_display, (void *) NULL)) {
-		LOGE(TAG, "can't create thread");
-		exit(EXIT_FAILURE);
+		SDL_RenderPresent(renderer);
 	}
 }
+
+static win_funcs_t proctec_funcs = {
+	open_window,
+	close_window,
+	event_handler,
+	update_display
+};
 
 /* I/O port for the VDM */
 void proctec_vdm_out(BYTE data)
@@ -271,7 +208,8 @@ void proctec_vdm_out(BYTE data)
 	first = (data & 0xf0) >> 4;
 	beg = data & 0x0f;
 
-	if (display == 0)
-		vdm_init();
+	if (proctec_win_id < 0)
+		proctec_win_id = simsdl_create(&proctec_funcs);
 
+	state = 1;
 }

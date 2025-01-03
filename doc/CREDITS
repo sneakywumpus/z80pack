@@ -60,3 +60,4 @@ regression tests.
 For the implementation of the Intel Intellec MDS-800 system.
 For the rewrite of the disassembler.
 For the implementation of a hardware breakpoint in the ICE.
+For converting z80pack to use SDL2 instead of X11.
