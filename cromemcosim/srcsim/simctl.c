@@ -4,6 +4,7 @@
  * This module allows operation of the system from a Cromemco Z-1 front panel
  *
  * Copyright (C) 2014-2024 by Udo Munk
+ * Copyright (C) 2025 by Thomas Eberhardt
  *
  * History:
  * 15-DEC-2014 first version
@@ -26,6 +27,7 @@
  * 04-NOV-2019 eliminate usage of mem_base()
  * 17-JUN-2021 allow building machine without frontpanel
  * 29-APR-2024 added CPU execution statistics
+ * 03-JAN-2025 use SDL2 instead of X11
  */
 
 #include <stdio.h>
@@ -51,6 +53,7 @@
 #endif
 
 #ifdef FRONTPANEL
+#include "simsdl.h"
 #include "frontpanel.h"
 #include "log.h"
 static const char *TAG = "system";
@@ -67,6 +70,14 @@ static void examine_clicked(int state, int val);
 static void deposit_clicked(int state, int val);
 static void power_clicked(int state, int val);
 static void quit_callback(void);
+
+static int fp_win_id;	/* frontpanel window id */
+static win_funcs_t fp_win_funcs = {
+	fp_openWindow,
+	fp_quit,
+	fp_procEvent,
+	fp_draw
+};
 #endif /* FRONTPANEL */
 
 /*
@@ -91,6 +102,7 @@ void mon(void)
 			LOGE(TAG, "frontpanel error");
 			exit(EXIT_FAILURE);
 		}
+		fp_win_id = simsdl_create(&fp_win_funcs);
 
 		fp_addQuitCallback(quit_callback);
 		fp_framerate(fp_fps);
@@ -228,7 +240,7 @@ void mon(void)
 		sleep_for_ms(999);
 
 		/* shutdown frontpanel */
-		fp_quit();
+		simsdl_destroy(fp_win_id);
 	}
 #endif
 
@@ -492,6 +504,8 @@ static void power_clicked(int state, int val)
  */
 static void quit_callback(void)
 {
+	simsdl_destroy(fp_win_id);
+
 	power--;
 	cpu_switch = 0;
 	cpu_state = ST_STOPPED;

@@ -4,6 +4,7 @@
  * This module allows operation of the system from an Altair 8800 front panel
  *
  * Copyright (C) 2008-2024 by Udo Munk
+ * Copyright (C) 2025 by Thomas Eberhardt
  *
  * History:
  * 20-OCT-2008 first version finished
@@ -31,6 +32,7 @@
  * 04-NOV-2019 eliminate usage of mem_base()
  * 31-JUL-2021 allow building machine without frontpanel
  * 29-APR-2024 print CPU execution statistics
+ * 03-JAN-2025 use SDL2 instead of X11
  */
 
 #include <stdio.h>

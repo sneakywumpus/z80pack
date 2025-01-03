@@ -2,13 +2,14 @@
  * Z80SIM  -  a Z80-CPU simulator
  *
  * Copyright (C) 2008-2024 by Udo Munk
- * Copyright (C) 2024 by Thomas Eberhardt
+ * Copyright (C) 2024-2025 by Thomas Eberhardt
  *
  * This module contains the user interface an Intel Intellec MDS-800 system
  *
  * History:
  * 03-JUN-2024 first version
  * 07-JUN-2024 rewrite of the monitor ports and the timing thread
+ * 03-JAN-2025 use SDL2 instead of X11
  */
 
 #include <stdio.h>
